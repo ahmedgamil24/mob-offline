@@ -1,6 +1,11 @@
+import "react-native-get-random-values";
+import NetInfo from "@react-native-community/netinfo";
 import React, { useState, useEffect } from "react";
 import { View, Text, TextInput, Button, FlatList } from "react-native";
-import { supabase } from "./src/lib/supabase";
+import { db, initDB } from "./src/lib/db";
+import { v4 as uuidv4 } from "uuid";
+import { startNetworkListener } from "./src/services/network";
+import { syncTodos } from "./src/services/sync";
 
 export default function App() {
   const [todos, setTodos] = useState<any[]>([]);
@@ -8,49 +13,65 @@ export default function App() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  // get
-  const getTodos = async () => {
-    const { data } = await supabase.from("todos").select();
+  // get from SQLite
+  const getTodos = () => {
+    const data = db.getAllSync("SELECT * FROM todos");
     setTodos(data || []);
   };
 
   useEffect(() => {
+    initDB();
     getTodos();
+    startNetworkListener()
+    syncTodos()
   }, []);
 
-  // add
+  // add (offline)
   const addTodo = async () => {
     if (!input) return;
 
-    await supabase.from("todos").insert([{ name: input }]);
+    const id = uuidv4();
+
+    db.runSync(
+      "INSERT INTO todos (id, name, synced) VALUES (?, ?, ?)",
+      [id, input, 0]
+    );
 
     setInput("");
-    getTodos(); // refresh
+    getTodos();
+
+    // sync if add in online mode
+    const state = await NetInfo.fetch();
+    if (state.isConnected){syncTodos()}
   };
 
-  // update
+  // update (offline)
   const updateTodo = async (id: string) => {
     if (editValue.trim().length === 0) return;
 
-    await supabase.from("todos").update({ name: editValue }).eq("id", id);
+    db.runSync(
+      "UPDATE todos SET name = ?, synced = 0 WHERE id = ?",
+      [editValue, id]
+    );
 
     setEditingId(null);
     setEditValue("");
     getTodos();
+
+    // sync if edit in online mode
+    const state = await NetInfo.fetch();
+    if (state.isConnected){syncTodos()}
   };
 
-  // delete
-  const deleteTodo = async (id: string) => {
-    await supabase.from("todos").delete().eq("id", id);
-
+  // delete (offline)
+  const deleteTodo = (id: string) => {
+    db.runSync("DELETE FROM todos WHERE id = ?", [id]);
     getTodos();
   };
 
-  console.log(todos);
-
   return (
     <View style={{ flex: 1, padding: 20 }}>
-      <Text style={{ marginTop: 20 }}>Todo App</Text>
+      <Text style={{ marginTop: 20 }}>Todo App (Offline)</Text>
 
       <TextInput
         placeholder="Enter todo..."
@@ -63,7 +84,7 @@ export default function App() {
 
       <FlatList
         data={todos}
-        keyExtractor={(item) => item.id.toString()}
+        keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View
             style={{
@@ -82,7 +103,6 @@ export default function App() {
                 />
 
                 <Button title="Save" onPress={() => updateTodo(item.id)} />
-
                 <Button title="Cancel" onPress={() => setEditingId(null)} />
               </>
             ) : (
@@ -98,7 +118,10 @@ export default function App() {
                     }}
                   />
 
-                  <Button title="Delete" onPress={() => deleteTodo(item.id)} />
+                  <Button
+                    title="Delete"
+                    onPress={() => deleteTodo(item.id)}
+                  />
                 </View>
               </>
             )}
