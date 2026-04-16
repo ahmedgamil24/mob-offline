@@ -6,6 +6,7 @@ import { db, initDB } from "./src/lib/db";
 import { v4 as uuidv4 } from "uuid";
 import { startNetworkListener } from "./src/services/network";
 import { syncTodos } from "./src/services/sync";
+import { pullTodos } from "./src/services/pullSync";
 
 export default function App() {
   const [todos, setTodos] = useState<any[]>([]);
@@ -23,7 +24,10 @@ export default function App() {
     initDB();
     getTodos();
     startNetworkListener()
+
     syncTodos()
+    pullTodos(getTodos)
+
   }, []);
 
   // add (offline)
